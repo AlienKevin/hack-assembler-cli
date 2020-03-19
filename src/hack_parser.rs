@@ -1,8 +1,44 @@
 #[path = "utils/parser.rs"]
 mod parser;
 
+use lazy_static::lazy_static;
 use parser::*;
+use std::collections::HashSet;
 
+lazy_static! {
+  static ref COMPUTATION_INSTRUCTIONS: HashSet<&'static str> = vec![
+    "0",
+    "1",
+    "-1",
+    "D",
+    "A",
+    "!D",
+    "!A",
+    "-D",
+    "-A",
+    "D+1",
+    "A+1",
+    "D-1",
+    "A-1",
+    "D+A",
+    "D-A",
+    "A-D",
+    "D&A",
+    "D|A",
+    "M",
+    "!M",
+    "-M",
+    "M+1",
+    "M-1",
+    "D+M",
+    "D-M",
+    "M-D",
+    "D&M",
+    "D|M",
+  ]
+  .into_iter()
+  .collect();
+}
 #[derive(Debug)]
 pub enum Instruction {
   A(usize),
@@ -29,19 +65,11 @@ pub struct Jump {
 }
 
 pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
-  let output = one_or_more_till_end(
-    move |input, state|
-    match token("@").parse(input, state) {
-      ParseResult::ParseOk { .. } =>
-        a_instruction().parse(input, state),
-      ParseResult::ParseError { .. } =>
-        either(
-          ignored(),
-          c_instruction(),
-        ).parse(input, state)
-    }
-  )
-    .parse(source, ParseState { row: 1, col: 1 });
+  let output = one_or_more_till_end(move |input, state| match token("@").parse(input, state) {
+    ParseResult::ParseOk { .. } => a_instruction().parse(input, state),
+    ParseResult::ParseError { .. } => either(ignored(), c_instruction()).parse(input, state),
+  })
+  .parse(source, ParseState { row: 1, col: 1 });
   match output {
     ParseResult::ParseOk { output, .. } => Ok(output),
     ParseResult::ParseError {
@@ -74,7 +102,24 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
       |character| *character != ';' && *character != '\n',
       "a computation instruction",
     ))
-    .map(|characters| characters.iter().collect::<String>())
+    .and_then(|characters| {
+      let comp_instruction = characters.iter().collect::<String>();
+      move |input, state|
+        match COMPUTATION_INSTRUCTIONS.get::<str>(&comp_instruction) {
+          Some(instruction) =>
+            ParseResult::ParseOk {
+              input,
+              state,
+              output: instruction,
+            },
+          None =>
+            ParseResult::ParseError {
+              message: format!("I can't find a computation instruction matching `{}`.\nTry something like `D+1` and `0`.", comp_instruction),
+              state,
+            }
+        }
+    }
+    )
     .and_then(move |computation| {
       left(
         optional(
@@ -127,7 +172,7 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
         )
         .map(move |jump| Instruction::C {
           destinations,
-          computation: computation.clone(),
+          computation: computation.to_string(),
           jump,
         }),
         newline_with_comment("//"),
