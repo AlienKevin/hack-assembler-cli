@@ -20,7 +20,14 @@ D=D+A
 @0
 M=D
 ";
-    print_result(hack_parser::parse(source));
+    print_result(assemble(source));
+}
+
+fn assemble(source: &str) -> Result<String, String>
+{
+  hack_parser::parse(source).map(
+      |ast| hack_emitter::emit(ast)
+  )
 }
 
 fn print_result<T, U>(result: Result<T, U>) -> ()

@@ -52,16 +52,16 @@ pub enum Instruction {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Destinations {
-  A: bool,
-  D: bool,
-  M: bool,
+  pub A: bool,
+  pub D: bool,
+  pub M: bool,
 }
 
 #[derive(Clone, Debug)]
 pub struct Jump {
-  LT: bool,
-  EQ: bool,
-  GT: bool,
+  pub LT: bool,
+  pub EQ: bool,
+  pub GT: bool,
 }
 
 pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
