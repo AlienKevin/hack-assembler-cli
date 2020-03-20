@@ -4,6 +4,7 @@ mod parser;
 use lazy_static::lazy_static;
 use parser::*;
 use std::collections::HashSet;
+use std::collections::HashMap;
 
 lazy_static! {
   static ref COMPUTATION_INSTRUCTIONS: HashSet<&'static str> = vec![
@@ -39,9 +40,16 @@ lazy_static! {
   .into_iter()
   .collect();
 }
-#[derive(Debug)]
+
+#[derive(Debug, Clone)]
+pub enum AInstruction {
+  number(usize),
+  label(Located<String>),
+}
+
+#[derive(Debug, Clone)]
 pub enum Instruction {
-  A(usize),
+  A(AInstruction),
   C {
     destinations: Option<Destinations>,
     computation: String,
@@ -64,33 +72,182 @@ pub struct Jump {
   pub GT: bool,
 }
 
+#[derive(Clone)]
+pub struct State {
+  symbol_table: Box<HashMap<String, usize>>,
+  instruction_index: usize,
+  variable_index: usize,
+}
+
 pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
-  let output = one_or_more_till_end(move |input, location| match token("@").parse(input, location) {
-    ParseResult::ParseOk { .. } => a_instruction().parse(input, location),
-    ParseResult::ParseError { .. } => either(ignored(), c_instruction()).parse(input, location),
-  })
-  .parse(source, Location { row: 1, col: 1 });
+  let initial_table: HashMap<String, usize> = vec![("R0", 0),
+    ("R1", 1),
+    ("R2", 2),
+    ("R3", 3),
+    ("R4", 4),
+    ("R5", 5),
+    ("R6", 6),
+    ("R7", 7),
+    ("R8", 8),
+    ("R9", 9),
+    ("R10", 10),
+    ("R11", 11),
+    ("R12", 12),
+    ("R13", 13),
+    ("R14", 14),
+    ("R15", 15),
+    ("SCREEN", 16384),
+    ("KBD", 24576),
+    ("SP", 0),
+    ("LCL", 1),
+    ("ARG", 2),
+    ("THIS", 3),
+    ("THAT", 4),
+    ].iter().cloned().map(|(key, value)| (key.to_string(), value)).collect();
+  let initial_state = State {
+    symbol_table: Box::new(initial_table),
+    instruction_index: 0,
+    variable_index: 16,
+  };
+  let output = one_or_more_till_end(|input, location, state: State| match maybe_indented(token("@")).parse(input, location, state.clone()) {
+    ParseResult::ParseOk { .. } => maybe_indented(a_instruction()).parse(input, location, state),
+    ParseResult::ParseError { .. } => maybe_indented(either(other(), c_instruction())).parse(input, location, state),
+  }).map_with_state(
+    |instructions, state|
+      instructions.iter().map(|instruction|
+        match instruction {
+          Instruction::A(a_instruction) =>
+            Instruction::A(
+              match a_instruction {
+              AInstruction::label(label) =>
+              {
+                println!("{:#?}", state.symbol_table);
+                match state.symbol_table.get(&label.value) {
+                  Some(index) => AInstruction::number(*index),
+                  None => {
+                    println!(
+                      "{}",
+                      display_error(
+                        source,
+                        format!("I found an undefined goto label `{}`", label.value),
+                        label.from,
+                        label.to,
+                      )
+                    );
+                    std::process::exit(0);
+                  }
+                }
+                },
+              _ => a_instruction.clone(),
+            }),
+          _ => instruction.clone(),
+        }
+      ).collect()
+  )
+  .parse(source, Location { row: 1, col: 1 }, initial_state);
   match output {
     ParseResult::ParseOk { output, .. } => Ok(output),
     ParseResult::ParseError {
       message: error_message,
       from,
       to,
+      ..
     } => Err(display_error(source, error_message, from, to)),
   }
 }
 
 // @3
-fn a_instruction<'a>() -> BoxedParser<'a, Instruction> {
+fn a_instruction<'a>() -> BoxedParser<'a, Instruction, State> {
   right(
     token("@"),
-    left(whole_decimal().pred(|number| *number <= 32767, "a decimal number <= 32767 (2^15 - 1)"), newline_with_comment("//")),
+    left(
+      choose3(
+        whole_decimal().pred(|number| *number <= 32767, "a decimal number <= 32767 (2^15 - 1)").map(|number| AInstruction::number(number)),
+        located(goto_label()).map(|label| AInstruction::label(label)),
+        located(variable_label()).map(|label| AInstruction::label(label)),
+      ), newline_with_comment("//")
+    ),
   )
-  .map(|number| Instruction::A(number))
+  .map(|instruction| Instruction::A(instruction))
+  .update_state(move | _output, state |
+    State {
+      instruction_index: state.instruction_index + 1,
+      ..state
+    }
+  )
+}
+
+pub fn variable_label<'a>() -> BoxedParser<'a, String, State> {
+  one_or_more(
+    any_char().pred(
+    | character |
+      character.is_lowercase() || character.is_digit(10) || *character == '_'
+    , "an all-lowercase variable name like `my_var`"
+    )
+  ).and_then(
+    | characters | {
+      let label = characters.iter().collect::<String>();
+      if label.starts_with("_") || label.ends_with("_") || label.contains("__") {
+        BoxedParser::new(move | _input, location: Location, state |
+          ParseResult::ParseError {
+            message: format!(
+              "I'm expecting an all-lowercase variable name like `my_var` but found `{}`.",
+              label
+            ),
+            from: Location {
+              col: location.col - label.len(),
+              ..location
+            },
+            to: location,
+            state,
+          }
+        )
+      } else {
+        BoxedParser::new(move | input, location, state |
+          ParseResult::ParseOk {
+            input, location, output: label.clone(), state,
+          }
+        )
+      }
+    }
+  )
+}
+
+pub fn goto_label<'a>() -> BoxedParser<'a, String, State> {
+  one_or_more(
+    any_char().pred(
+    | character |
+      character.is_uppercase() || character.is_digit(10) || *character == '_'
+    , "an all-caps goto label like LOOP_ONE"
+    )
+  ).and_then(
+    | characters | {
+      let label = characters.iter().collect::<String>();
+      if label.starts_with("_") || label.ends_with("_") || label.contains("__") {
+        BoxedParser::new(move | _input, location: Location, state |
+          ParseResult::ParseError {
+            message: "I'm expecting an all-caps goto label like LOOP_ONE".to_string(),
+            from: Location {
+              col: location.col - label.len(),
+              ..location
+            },
+            to: location,
+            state,
+          }
+        )
+      } else {
+        BoxedParser::new(move | input, location, state |
+          ParseResult::ParseOk {
+            input, location, output: label.clone(), state,
+          }
+        )
+      }
+    }
+  )
 }
 
 // D=D+A;JMP
-fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
+fn c_instruction<'a>() -> BoxedParser<'a, Instruction, State> {
   optional(
     None,
     left(
@@ -105,13 +262,14 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
     ))
     .and_then(|characters| {
       let comp_instruction = characters.iter().collect::<String>();
-      move |input, location|
+      move |input, location, state|
         match COMPUTATION_INSTRUCTIONS.get::<str>(&comp_instruction) {
           Some(instruction) =>
             ParseResult::ParseOk {
               input,
               location,
               output: instruction,
+              state,
             },
           None =>
             ParseResult::ParseError {
@@ -121,6 +279,7 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
                 col: location.col - comp_instruction.len(),
               },
               to: location,
+              state,
             }
         }
     }
@@ -183,10 +342,15 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
         newline_with_comment("//"),
       )
     })
+  }).update_state(|_output, state| {
+    State {
+      instruction_index: state.instruction_index + 1,
+      ..state
+    }
   })
 }
 
-fn destinations<'a>() -> impl Parser<'a, Destinations> {
+fn destinations<'a>() -> impl Parser<'a, Destinations, State> {
   choose3(
     choose3(
       token("AMD").map(|_| Destinations {
@@ -230,6 +394,42 @@ fn destinations<'a>() -> impl Parser<'a, Destinations> {
   )
 }
 
-fn ignored<'a>() -> BoxedParser<'a, Instruction> {
-  either(line_comment("//"), newline_char()).map(|_| Instruction::Ignored)
+fn other<'a>() -> BoxedParser<'a, Instruction, State> {
+  BoxedParser::new(|input, location, state: State| {
+    match token("(").parse(input, location, state.clone()) {
+      ParseResult::ParseOk { .. } =>
+        right(
+          token("("),
+        left(
+          goto_label(),
+          token(")"),
+        ).update_state(move |label, state|
+          if !state.symbol_table.contains_key::<str>(&label) {
+            let mut new_symbol_table = state.symbol_table.clone();
+            new_symbol_table.insert(label.clone(), state.instruction_index + 1);
+            println!("new symbol table: {:#?}", state.symbol_table);
+            State {
+              symbol_table: new_symbol_table,
+              ..state
+            }
+          } else {
+            state
+          }
+        )
+      ).ignore().parse(input, location, state),
+      ParseResult::ParseError { .. } =>
+        either(line_comment("//"), newline_char()).parse(input, location, state),
+    }.map(|_| Instruction::Ignored)
+  })
+}
+
+fn maybe_indented<'a, A: 'a>(parser: BoxedParser<'a, A, State>) -> BoxedParser<'a, A, State>
+{
+  BoxedParser::new(move |input, location, state: State|
+    match zero_or_more(space_char()).parse(input, location, state.clone()) {
+      ParseResult::ParseOk{ input: next_input, location: next_location, ..} =>
+        parser.parse(next_input, next_location, state),
+      ParseResult::ParseError { .. } =>
+        parser.parse(input, location, state),
+  })
 }

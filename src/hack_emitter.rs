@@ -42,7 +42,11 @@ pub fn emit(instructions: Vec<Instruction>) -> String {
   instructions
     .iter()
     .map(|instruction| match instruction {
-      Instruction::A(number) => format!("0{:015b}\n", number),
+      Instruction::A(instruction) =>
+        match instruction {
+          AInstruction::number(number) => format!("0{:015b}\n", number),
+          AInstruction::label(label) => panic!("I found an unconverted label `{}` in the A instruction.\nAll labels should be converted by the parser before emitting binary code.", label.value),
+        }
       Instruction::C {
         destinations,
         computation,
