@@ -4,7 +4,7 @@ mod parser;
 use lazy_static::lazy_static;
 use parser::*;
 use std::collections::HashSet;
-use std::collections::HashMap;
+use im::hashmap::HashMap;
 
 lazy_static! {
   static ref COMPUTATION_INSTRUCTIONS: HashSet<&'static str> = vec![
@@ -74,7 +74,7 @@ pub struct Jump {
 
 #[derive(Clone)]
 pub struct State {
-  symbol_table: Box<HashMap<String, usize>>,
+  symbol_table: HashMap<String, usize>,
   instruction_index: usize,
   variable_index: usize,
 }
@@ -105,7 +105,7 @@ pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
     ("THAT", 4),
     ].iter().cloned().map(|(key, value)| (key.to_string(), value)).collect();
   let initial_state = State {
-    symbol_table: Box::new(initial_table),
+    symbol_table: initial_table,
     instruction_index: 0,
     variable_index: 16,
   };
@@ -405,9 +405,8 @@ fn other<'a>() -> BoxedParser<'a, Instruction, State> {
           token(")"),
         ).update_state(move |label, state|
           if !state.symbol_table.contains_key::<str>(&label) {
-            let mut new_symbol_table = state.symbol_table.clone();
-            new_symbol_table.insert(label.clone(), state.instruction_index + 1);
-            println!("new symbol table: {:#?}", state.symbol_table);
+            let new_symbol_table = state.symbol_table.update(label.clone(), state.instruction_index + 1);
+            println!("new symbol table: {:#?}", new_symbol_table);
             State {
               symbol_table: new_symbol_table,
               ..state
