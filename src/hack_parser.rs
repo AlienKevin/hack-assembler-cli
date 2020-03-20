@@ -100,7 +100,7 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
   )
   .and_then(|destinations| {
     one_or_more(any_char().pred(
-      |character| *character != ';' && *character != '\n',
+      |character| *character != ';' && *character != '\n' && *character != '\r',
       "a computation instruction",
     ))
     .and_then(|characters| {
