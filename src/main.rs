@@ -1,3 +1,4 @@
+mod hack_assembler;
 mod hack_parser;
 mod hack_emitter;
 
@@ -20,14 +21,7 @@ D=D+A
 @0
 M=D
 ";
-    print_result(assemble(source));
-}
-
-fn assemble(source: &str) -> Result<String, String>
-{
-  hack_parser::parse(source).map(
-      |ast| hack_emitter::emit(ast)
-  )
+    print_result(hack_assembler::assemble(source));
 }
 
 fn print_result<T, U>(result: Result<T, U>) -> ()
