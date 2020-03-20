@@ -1,4 +1,5 @@
 mod hack_parser;
+mod hack_emitter;
 
 use core::fmt::Debug;
 use core::fmt::Display;
@@ -12,7 +13,7 @@ fn main() {
 
 // Computes R0 = 2 + 3  (R0 refers to RAM[0])
 
-@2
+@32767
 D=A
 @3
 D=D+A

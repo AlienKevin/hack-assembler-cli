@@ -65,17 +65,18 @@ pub struct Jump {
 }
 
 pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
-  let output = one_or_more_till_end(move |input, state| match token("@").parse(input, state) {
-    ParseResult::ParseOk { .. } => a_instruction().parse(input, state),
-    ParseResult::ParseError { .. } => either(ignored(), c_instruction()).parse(input, state),
+  let output = one_or_more_till_end(move |input, location| match token("@").parse(input, location) {
+    ParseResult::ParseOk { .. } => a_instruction().parse(input, location),
+    ParseResult::ParseError { .. } => either(ignored(), c_instruction()).parse(input, location),
   })
-  .parse(source, ParseState { row: 1, col: 1 });
+  .parse(source, Location { row: 1, col: 1 });
   match output {
     ParseResult::ParseOk { output, .. } => Ok(output),
     ParseResult::ParseError {
       message: error_message,
-      state: error_state,
-    } => Err(display_error(source, error_message, error_state)),
+      from,
+      to,
+    } => Err(display_error(source, error_message, from, to)),
   }
 }
 
@@ -83,7 +84,7 @@ pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
 fn a_instruction<'a>() -> BoxedParser<'a, Instruction> {
   right(
     token("@"),
-    left(whole_decimal(), newline_with_comment("//")),
+    left(whole_decimal().pred(|number| *number <= 32767, "a decimal number <= 32767 (2^15 - 1)"), newline_with_comment("//")),
   )
   .map(|number| Instruction::A(number))
 }
@@ -104,18 +105,22 @@ fn c_instruction<'a>() -> BoxedParser<'a, Instruction> {
     ))
     .and_then(|characters| {
       let comp_instruction = characters.iter().collect::<String>();
-      move |input, state|
+      move |input, location|
         match COMPUTATION_INSTRUCTIONS.get::<str>(&comp_instruction) {
           Some(instruction) =>
             ParseResult::ParseOk {
               input,
-              state,
+              location,
               output: instruction,
             },
           None =>
             ParseResult::ParseError {
               message: format!("I can't find a computation instruction matching `{}`.\nTry something like `D+1` and `0`.", comp_instruction),
-              state,
+              from: Location {
+                row: location.row,
+                col: location.col - comp_instruction.len(),
+              },
+              to: location,
             }
         }
     }

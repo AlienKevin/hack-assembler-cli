@@ -17,61 +17,57 @@ pub struct Location {
 pub enum ParseResult<'a, Output> {
   ParseOk {
     input: &'a str,
-    state: ParseState,
+    location: Location,
     output: Output,
   },
   ParseError {
     message: String,
-    state: ParseState,
+    from: Location,
+    to: Location,
   },
 }
 
 impl<'a, T> ParseResult<'a, T> {
   pub fn map<U, F: FnOnce(T) -> U>(self, func: F) -> ParseResult<'a, U> {
     match self {
-      ParseResult::ParseOk { input, state, output } =>
+      ParseResult::ParseOk { input, location, output } =>
         ParseResult::ParseOk {
           input,
-          state,
+          location,
           output: func(output)
         },
-      ParseResult::ParseError { message, state } =>
-        ParseResult::ParseError { message, state },
+      ParseResult::ParseError { message, from, to } =>
+        ParseResult::ParseError { message, from, to },
     }
   }
   pub fn map_err<F: FnOnce(String) -> String>(self, func: F) -> ParseResult<'a, T> {
     match self {
-      ParseResult::ParseOk { input, state, output } =>
+      ParseResult::ParseOk { input, location, output } =>
         ParseResult::ParseOk {
           input,
-          state,
+          location,
           output,
         },
-      ParseResult::ParseError { message, state } =>
+      ParseResult::ParseError { message, from, to } =>
         ParseResult::ParseError {
           message: func(message),
-          state,
+          from,
+          to,
         }
     }
   }
-  pub fn and_then<U, F: FnOnce(&'a str, T, ParseState) -> ParseResult<'a, U>>(self, func: F) -> ParseResult<'a, U> {
+  pub fn and_then<U, F: FnOnce(&'a str, T, Location) -> ParseResult<'a, U>>(self, func: F) -> ParseResult<'a, U> {
     match self {
-      ParseResult::ParseOk { input, output, state } =>
-        func(input, output, state),
-      ParseResult::ParseError { message, state } =>
-        ParseResult::ParseError { message, state },
+      ParseResult::ParseOk { input, output, location } =>
+        func(input, output, location),
+      ParseResult::ParseError { message, from, to } =>
+        ParseResult::ParseError { message, from, to },
     }
   }
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct ParseState {
-  pub row: usize,
-  pub col: usize,
-}
-
 pub trait Parser<'a, Output> {
-  fn parse(&self, input: &'a str, state: ParseState) -> ParseResult<'a, Output>;
+  fn parse(&self, input: &'a str, location: Location) -> ParseResult<'a, Output>;
   fn map<F, NewOutput>(self, map_fn: F) -> BoxedParser<'a, NewOutput>
     where
         Self: Sized + 'a,
@@ -102,7 +98,7 @@ pub trait Parser<'a, Output> {
   fn pred<F>(self, predicate: F, expecting: &'a str) -> BoxedParser<'a, Output>
   where
     Self: Sized + 'a,
-    Output: 'a,
+    Output: std::fmt::Display + 'a,
     F: Fn(&Output) -> bool + 'a,
   {
     BoxedParser::new(pred(self, predicate, expecting))
@@ -118,10 +114,10 @@ pub trait Parser<'a, Output> {
 
 impl<'a, F, Output> Parser<'a, Output> for F
 where
-  F: Fn(&'a str, ParseState) -> ParseResult<Output>,
+  F: Fn(&'a str, Location) -> ParseResult<Output>,
 {
-  fn parse(&self, input: &'a str, state: ParseState) -> ParseResult<'a, Output> {
-    self(input, state)
+  fn parse(&self, input: &'a str, location: Location) -> ParseResult<'a, Output> {
+    self(input, location)
   }
 }
 
@@ -141,8 +137,8 @@ impl<'a, Output> BoxedParser<'a, Output> {
 }
 
 impl<'a, Output> Parser<'a, Output> for BoxedParser<'a, Output> {
-  fn parse(&self, input: &'a str, state: ParseState) -> ParseResult<'a, Output> {
-      self.parser.parse(input, state)
+  fn parse(&self, input: &'a str, location: Location) -> ParseResult<'a, Output> {
+      self.parser.parse(input, location)
   }
 }
 
@@ -152,21 +148,21 @@ fn and_then<'a, P, F, A, B, NextP>(parser: P, f: F) -> impl Parser<'a, B>
     NextP: Parser<'a, B>,
     F: Fn(A) -> NextP
 {
-  move |input, state| parser.parse(input, state)
-    .and_then(| next_input, next_output, next_state |
-      f(next_output).parse(next_input, next_state)
+  move |input, location| parser.parse(input, location)
+    .and_then(| next_input, next_output, next_location |
+      f(next_output).parse(next_input, next_location)
     )
 }
 
 pub fn token<'a>(expected: &'static str) -> BoxedParser<'a, &str> {
   BoxedParser::new(
-    move |input: &'a str, state: ParseState| {
+    move |input: &'a str, location: Location| {
     let found = input.get(0..expected.len());
     match found {
       Some(next) if next == expected => ParseResult::ParseOk {
         input: &input[expected.len()..],
         output: expected,
-        state: increment_col(expected.len(), state),
+        location: increment_col(expected.len(), location),
       },
       _ => ParseResult::ParseError {
         message: format!(
@@ -174,22 +170,29 @@ pub fn token<'a>(expected: &'static str) -> BoxedParser<'a, &str> {
           expected,
           display_token(found)
         ),
-        state,
+        from: location,
+        to: match found {
+          Some(found_str) => Location {
+            row: location.row + found_str.len(),
+            col: location.col,
+          },
+          None => location,
+        }
       },
     }
   })
 }
 
-pub fn increment_col(additional_col: usize, state: ParseState) -> ParseState {
-  ParseState {
-    col: state.col + additional_col,
-    ..state
+pub fn increment_col(additional_col: usize, location: Location) -> Location {
+  Location {
+    col: location.col + additional_col,
+    ..location
   }
 }
 
-pub fn increment_row(additional_row: usize, state: ParseState) -> ParseState {
-  ParseState {
-    row: state.row + additional_row,
+pub fn increment_row(additional_row: usize, location: Location) -> Location {
+  Location {
+    row: location.row + additional_row,
     col: 1,
   }
 }
@@ -206,10 +209,10 @@ where
   P1: Parser<'a, R1>,
   P2: Parser<'a, R2>,
 {
-  move |input, state|
-    parser1.parse(input, state)
-      .and_then(| next_input, first_output, next_state |
-        parser2.parse(next_input, next_state).map(| second_output |
+  move |input, location|
+    parser1.parse(input, location)
+      .and_then(| next_input, first_output, next_location |
+        parser2.parse(next_input, next_location).map(| second_output |
           (first_output, second_output)
         )
       )
@@ -239,7 +242,7 @@ where
   F: Fn(A) -> B,
 {
   BoxedParser::new(
-    move |input, state| parser.parse(input, state).map(
+    move |input, location| parser.parse(input, location).map(
     |output| map_fn(output)
   ))
 }
@@ -249,7 +252,7 @@ where
   P: Parser<'a, A>,
   F: Fn(String) -> String,
 {
-  move |input, state| parser.parse(input, state).map_err(
+  move |input, location| parser.parse(input, location).map_err(
     |error_message| map_fn(error_message)
   )
 }
@@ -260,7 +263,7 @@ where
   P2: Parser<'a, B>,
   F: Fn(A, B) -> C,
 {
-  move |input, state| parser1.parse(input, state).and_then(
+  move |input, location| parser1.parse(input, location).and_then(
     |input1, output1, state1 | parser2.parse(input1, state1).map(
       |output2| map_fn(output1, output2)
     )
@@ -301,48 +304,52 @@ pub fn one_or_more_with_ending<'a, P, A>(till_end: bool, parser: P) -> impl Pars
 where
   P: Parser<'a, A>,
 {
-  move |mut input, mut state| {
+  move |mut input, mut location| {
     let mut result = Vec::new();
 
-    match parser.parse(input, state) {
+    match parser.parse(input, location) {
       ParseResult::ParseOk {
         input: next_input,
         output: first_item,
-        state: next_state,
+        location: next_location,
       } => {
         input = next_input;
-        state = next_state;
+        location = next_location;
         result.push(first_item);
       }
       ParseResult::ParseError {
         message: error_message,
-        state: error_state,
+        from,
+        to,
       } => {
         return ParseResult::ParseError {
           message: error_message,
-          state: error_state,
+          from,
+          to,
         };
       }
     }
 
     loop {
-      match parser.parse(input, state) {
+      match parser.parse(input, location) {
         ParseResult::ParseOk {
           input: next_input,
           output: next_item,
-          state: next_state,
+          location: next_location,
         } => {
           input = next_input;
-          state = next_state;
+          location = next_location;
           result.push(next_item);
         },
         ParseResult::ParseError {
           message: error_message,
-          state: error_state,
+          from,
+          to,
         } => if till_end && input != "" {
           return ParseResult::ParseError {
             message: error_message,
-            state: error_state,
+            from,
+            to,
           };
         } else {
           break;
@@ -353,7 +360,7 @@ where
     ParseResult::ParseOk {
       input: input,
       output: result,
-      state: state,
+      location: location,
     }
   }
 }
@@ -363,56 +370,70 @@ where
   P: Parser<'a, A>,
 {
   BoxedParser::new(
-    move |mut input, mut state| {
+    move |mut input, mut location| {
     let mut result = Vec::new();
 
     while let ParseResult::ParseOk {
       input: next_input,
       output: next_item,
-      state: next_state,
-    } = parser.parse(input, state)
+      location: next_location,
+    } = parser.parse(input, location)
     {
       input = next_input;
-      state = next_state;
+      location = next_location;
       result.push(next_item);
     }
 
     ParseResult::ParseOk {
       input: input,
       output: result,
-      state: state,
+      location: location,
     }
   })
 }
 
 pub fn any_char<'a>() -> impl Parser<'a, char> {
-  |input: &'a str, state: ParseState| match input.chars().next() {
+  |input: &'a str, location: Location| match input.chars().next() {
     Some(character) => ParseResult::ParseOk {
       input: &input[character.len_utf8()..],
       output: character,
-      state: increment_col(character.len_utf8(), state),
+      location: increment_col(character.len_utf8(), location),
     },
     _ => ParseResult::ParseError {
       message: "I'm expecting any character but reached the end of input.".to_string(),
-      state: state,
+      from: location,
+      to: location,
     },
   }
 }
 
-fn pred<'a, P, F, A>(parser: P, predicate: F, expecting: &'a str) -> impl Parser<'a, A>
+fn pred<'a, P, F, A: std::fmt::Display>(parser: P, predicate: F, expecting: &'a str) -> impl Parser<'a, A>
 where
   P: Parser<'a, A>,
   F: Fn(&A) -> bool,
 {
-  move |input, state| match parser.parse(input, state) {
+  move |input, location| match parser.parse(input, location) {
     ParseResult::ParseOk {
       input: next_input,
       output: content,
-      state: next_state,
-    } if predicate(&content) => ParseResult::ParseOk {
-      input: next_input,
-      output: content,
-      state: next_state,
+      location: next_location,
+    } => if predicate(&content) {
+      ParseResult::ParseOk {
+        input: next_input,
+        output: content,
+        location: next_location,
+      }
+    } else {
+      ParseResult::ParseError {
+        message: format!(
+          "I'm expecting {} but found {}.",
+          expecting,
+          display_token(Some(content)),
+        )
+        .to_string(),
+        from: location,
+        to: next_location,
+        }
     },
     _ => ParseResult::ParseError {
       message: format!(
@@ -421,7 +442,8 @@ where
         display_token(input.chars().next())
       )
       .to_string(),
-      state: state,
+      from: location,
+      to: location,
     },
   }
 }
@@ -435,44 +457,46 @@ pub fn space_char<'a>() -> BoxedParser<'a, ()> {
 
 pub fn newline_char<'a>() -> BoxedParser<'a, ()> {
   BoxedParser::new(
-    (move |input, state| {
+    (move |input, location| {
       let mut next_input: &str = input;
-      let mut next_state: ParseState = state;
+      let mut next_location: Location = location;
       let result1 = any_char().pred(
         |character| *character == '\r',
         "a carriage return",
-      ).parse(input, state);
+      ).parse(input, location);
       match result1 {
         ParseResult::ParseOk {
           input,
-          state,
+          location,
           ..
         } => {
           next_input = input;
-          next_state = state;
+          next_location = location;
         }
         _ => {}
       }
       let result = any_char().pred(
         |character| *character == '\n',
         "a newline",
-      ).parse(next_input, next_state);
+      ).parse(next_input, next_location);
       match result {
         ParseResult::ParseOk {
           input: next_input,
           output,
-          state: next_state,
+          location: next_location,
         } => ParseResult::ParseOk {
           input: next_input,
           output: output,
-          state: increment_row(1, next_state)
+          location: increment_row(1, next_location)
         },
         ParseResult::ParseError {
           message: error_message,
-          state: error_state,
+          from,
+          to,
         } => ParseResult::ParseError {
           message: error_message,
-          state: error_state,
+          from,
+          to,
         }
       }
     }).ignore()
@@ -523,13 +547,13 @@ fn repeat<'a, A, P>(times: usize, parser: P)
   where
     P: Parser<'a, A>
 {
-  move |mut input, mut state| {
+  move |mut input, mut location| {
     let mut result = Vec::new();
 
     if times == 0 {
       return ParseResult::ParseOk {
         input,
-        state,
+        location,
         output: result,
       }
     }
@@ -539,14 +563,14 @@ fn repeat<'a, A, P>(times: usize, parser: P)
     while let ParseResult::ParseOk {
       input: next_input,
       output: next_item,
-      state: next_state,
-    } = parser.parse(input, state)
+      location: next_location,
+    } = parser.parse(input, location)
     {
       if counter >= times {
         break;
       }
       input = next_input;
-      state = next_state;
+      location = next_location;
       result.push(next_item);
       counter = counter + 1;
     }
@@ -554,7 +578,7 @@ fn repeat<'a, A, P>(times: usize, parser: P)
     ParseResult::ParseOk {
       input: input,
       output: result,
-      state: state,
+      location: location,
     }
   }
 }
@@ -579,11 +603,11 @@ pub fn either<'a, A, P: 'a>(parser1: P, parser2: P)
     P: Parser<'a, A>
 {
   BoxedParser::new(
-    move |input, state|
-      match parser1.parse(input, state) {
+    move |input, location|
+      match parser1.parse(input, location) {
         ok @ ParseResult::ParseOk {..} => ok,
         ParseResult::ParseError {..} =>
-          parser2.parse(input, state)
+          parser2.parse(input, location)
       }
   )
 }
@@ -598,10 +622,10 @@ pub fn optional<'a, A: Clone + 'a, P: 'a>(default: A, parser: P)
       parser
     ),
     BoxedParser::new(
-      move |input, state|
+      move |input, location|
       ParseResult::ParseOk {
           input,
-          state,
+          location,
           output: default.clone(),
         }
       )
@@ -650,16 +674,16 @@ pub fn line_comments<'a>(indentations: usize) -> BoxedParser<'a, ()> {
 pub fn ignore_chain<'a>(parsers: Vec<BoxedParser<'a, ()>>) -> BoxedParser<'a, ()>
 {
   BoxedParser::new(
-    move | mut input, mut state | {
+    move | mut input, mut location | {
     for parser in &parsers {
-      match parser.parse(input, state) {
+      match parser.parse(input, location) {
         ParseResult::ParseOk {
           input: next_input,
-          state: next_state,
+          location: next_location,
           ..
         } => {
           input = next_input;
-          state = next_state;
+          location = next_location;
         },
         error @ ParseResult::ParseError {..} => {
           return error;
@@ -668,7 +692,7 @@ pub fn ignore_chain<'a>(parsers: Vec<BoxedParser<'a, ()>>) -> BoxedParser<'a, ()
     }
     ParseResult::ParseOk {
       input,
-      state,
+      location,
       output: (),
     }
   })
@@ -688,43 +712,50 @@ pub fn located<'a, P: 'a, A>(parser: P) -> impl Parser<'a, Located<A>>
   where
     P: Parser<'a, A>
 {
-  move |input, state|
-  match parser.parse(input, state) {
+  move |input, location|
+  match parser.parse(input, location) {
     ParseResult::ParseOk {
       input: next_input,
       output,
-      state: next_state
+      location: next_location
     } => ParseResult::ParseOk {
         input: next_input,
         output: Located {
           value: output,
           from: Location {
-            row: state.row,
-            col: state.col,
+            row: location.row,
+            col: location.col,
           },
           to: Location {
-            row: next_state.row,
-            col: next_state.col,
+            row: next_location.row,
+            col: next_location.col,
           },
         },
-        state: next_state,
+        location: next_location,
       },
     ParseResult::ParseError {
       message: error_message,
-      state: error_state,
+      from,
+      to,
     } =>
       ParseResult::ParseError {
         message: error_message,
-        state: error_state,
+        from,
+        to,
       }
   }
 }
 
-pub fn display_error(source: &str, error_message: String, state: ParseState) -> String {
-  let row = state.row;
-  let col = state.col;
+pub fn display_error(source: &str, error_message: String, from: Location, to: Location) -> String {
+  let row = from.row;
+  let col = from.col;
+  let error_length = if to.col == from.col {
+    1
+  } else {
+    to.col - from.col
+  };
   let error_line = row.to_string() + "| " + source.split("\n").collect::<Vec<&str>>()[row - 1];
-  let error_pointer = " ".repeat(col - 1 + row.to_string().len() + 2) + "^";
+  let error_pointer = " ".repeat(col - 1 + row.to_string().len() + 2) + &"^".repeat(error_length);
   let error_report =
     error_line + "\n" + &error_pointer + "\n" + "⚠️" + &error_message;
   error_report
