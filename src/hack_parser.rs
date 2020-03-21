@@ -163,7 +163,20 @@ fn a_instruction<'a>() -> BoxedParser<'a, Instruction, State> {
       choose3(
         whole_decimal().pred(|number| *number <= 32767, "a decimal number <= 32767 (2^15 - 1)").map(|number| AInstruction::number(number)),
         located(goto_label()).map(|label| AInstruction::label(label)),
-        located(variable_label()).map(|label| AInstruction::label(label)),
+        located(variable_label()).update_state(|label, state|
+          if !state.symbol_table.contains_key::<str>(&label.value) {
+            let new_symbol_table = state.symbol_table.update(label.value.clone(), state.variable_index);
+            State {
+              variable_index: state.variable_index + 1,
+              symbol_table: new_symbol_table,
+              ..state
+            }
+          } else {
+            state
+          }
+        ).map(|label|
+          AInstruction::label(label)
+        ),
       ), newline_with_comment("//")
     ),
   )
@@ -404,9 +417,8 @@ fn other<'a>() -> BoxedParser<'a, Instruction, State> {
           token(")"),
         ).update_state(move |label, state|
           if !state.symbol_table.contains_key::<str>(&label) {
-            let new_symbol_table = state.symbol_table.update(label.clone(), state.variable_index + 1);
+            let new_symbol_table = state.symbol_table.update(label.clone(), state.instruction_index);
             State {
-              variable_index: state.variable_index + 1,
               symbol_table: new_symbol_table,
               ..state
             }

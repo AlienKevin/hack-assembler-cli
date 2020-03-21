@@ -303,9 +303,31 @@ where
   F: Fn(A, S) -> B,
 {
   BoxedParser::new(
-    move |input, location, state: S| parser.parse(input, location, state.clone()).map(
-    |output| map_fn(output, state.clone())
-  ))
+    move |input, location, state: S| match parser.parse(input, location, state.clone()) {
+      ParseResult::ParseOk {
+        input: next_input,
+        output,
+        location: next_location,
+        state: next_state,
+      } => ParseResult::ParseOk {
+        input: next_input,
+        location: next_location,
+        output: map_fn(output, next_state.clone()),
+        state: next_state,
+      },
+      ParseResult::ParseError {
+        message,
+        from,
+        to,
+        state: error_state,
+      } => ParseResult::ParseError {
+        message,
+        from,
+        to,
+        state: error_state,
+      }
+    }
+  )
 }
 
 pub fn map_err<'a, P, F, A, S: Clone + Debug + 'a>(parser: P, map_fn: F) -> impl Parser<'a, A, S>
