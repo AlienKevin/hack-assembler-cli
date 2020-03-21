@@ -159,26 +159,33 @@ pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
 fn a_instruction<'a>() -> BoxedParser<'a, Instruction, State> {
   right(
     token("@"),
-    left(
-      choose3(
+    choose3(
+      left(
         whole_decimal().pred(|number| *number <= 32767, "a decimal number <= 32767 (2^15 - 1)").map(|number| AInstruction::number(number)),
-        located(goto_label()).map(|label| AInstruction::label(label)),
+        newline_with_comment("//"),
+      ),
+      left(
         located(variable_label()).update_state(|label, state|
-          if !state.symbol_table.contains_key::<str>(&label.value) {
-            let new_symbol_table = state.symbol_table.update(label.value.clone(), state.variable_index);
-            State {
-              variable_index: state.variable_index + 1,
-              symbol_table: new_symbol_table,
-              ..state
-            }
-          } else {
-            state
+        if !state.symbol_table.contains_key::<str>(&label.value) {
+          let new_symbol_table = state.symbol_table.update(label.value.clone(), state.variable_index);
+          State {
+            variable_index: state.variable_index + 1,
+            symbol_table: new_symbol_table,
+            ..state
           }
+        } else {
+          state
+        }
         ).map(|label|
           AInstruction::label(label)
         ),
-      ), newline_with_comment("//")
-    ),
+        newline_with_comment("//"),
+      ),
+      left(
+        located(goto_label()).map(|label| AInstruction::label(label)),
+        newline_with_comment("//"),
+      ),
+    )
   )
   .map(|instruction| Instruction::A(instruction))
   .update_state(move | _output, state |
@@ -193,14 +200,20 @@ pub fn variable_label<'a>() -> BoxedParser<'a, String, State> {
   one_or_more(
     any_char().pred(
     | character |
-      character.is_lowercase() || character.is_digit(10) || *character == '_'
-    , "an all-lowercase variable name like `my_var`"
+      character.is_lowercase() || character.is_digit(10)
+    , "a static variable name optionally ended with `.` and some number like `counter` and `var.0`"
     )
-  ).and_then(
-    | characters | {
-      let label = characters.iter().collect::<String>();
-      if label.starts_with("_") || label.ends_with("_") || label.contains("__") {
-        BoxedParser::new(move | _input, location: Location, state |
+  ).and_then(|name_chars| {
+    let name = name_chars.iter().collect::<String>();
+    optional(name.clone(), right(
+      token("."),
+      whole_decimal(),
+    ).map(move |index| name.clone() + &index.to_string()))
+  }).and_then(
+    | label | {
+      if let Some(digit_index) = label.find(|c: char | c.is_digit(10)) {
+        if digit_index == 0 {
+        return BoxedParser::new(move | _input, location: Location, state |
           ParseResult::ParseError {
             message: format!(
               "I'm expecting an all-lowercase variable name like `my_var` but found `{}`.",
@@ -214,13 +227,13 @@ pub fn variable_label<'a>() -> BoxedParser<'a, String, State> {
             state,
           }
         )
-      } else {
-        BoxedParser::new(move | input, location, state |
-          ParseResult::ParseOk {
-            input, location, output: label.clone(), state,
-          }
-        )
       }
+      }
+      BoxedParser::new(move | input, location, state |
+        ParseResult::ParseOk {
+          input, location, output: label.clone(), state,
+        }
+      )
     }
   )
 }
@@ -229,13 +242,15 @@ pub fn goto_label<'a>() -> BoxedParser<'a, String, State> {
   one_or_more(
     any_char().pred(
     | character |
-      character.is_uppercase() || character.is_digit(10) || *character == '_'
-    , "an all-caps goto label like LOOP_ONE"
+      character.is_alphanumeric() || *character == '_' || *character == '.' || *character == '$'
+    , "a goto label like `LOOP_ONE` or `ponggame.run$if_end1`"
     )
   ).and_then(
     | characters | {
       let label = characters.iter().collect::<String>();
-      if label.starts_with("_") || label.ends_with("_") || label.contains("__") {
+      if label.starts_with("_") || label.ends_with("_") || label.contains("__")
+        || label.starts_with(".") || label.ends_with(".") || label.contains("..")
+        || label.starts_with("$") || label.ends_with("$") || label.contains("$$") {
         BoxedParser::new(move | _input, location: Location, state |
           ParseResult::ParseError {
             message: "I'm expecting an all-caps goto label like LOOP_ONE".to_string(),
@@ -427,7 +442,6 @@ fn other<'a>() -> BoxedParser<'a, Instruction, State> {
           }
         )
       ).ignore().parse(input, location, state);
-      println!("{:#?}", result);
       result
       },
       ParseResult::ParseError { .. } =>
