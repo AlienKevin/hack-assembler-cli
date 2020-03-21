@@ -29,7 +29,7 @@ pub enum ParseResult<'a, Output, State> {
   },
 }
 
-impl<'a, T, S: Clone + Debug> ParseResult<'a, T, S> {
+impl<'a, T, S: Clone> ParseResult<'a, T, S> {
   pub fn map<U, F: FnOnce(T) -> U>(self, func: F) -> ParseResult<'a, U, S> {
     match self {
       ParseResult::ParseOk { input, location, output, state } =>
@@ -84,7 +84,7 @@ impl<'a, T, S: Clone + Debug> ParseResult<'a, T, S> {
   }
 }
 
-pub trait Parser<'a, Output, State: Clone + Debug> {
+pub trait Parser<'a, Output, State: Clone> {
   fn parse(&self, input: &'a str, location: Location, state: State) -> ParseResult<'a, Output, State>;
   fn map<F, NewOutput>(self, map_fn: F) -> BoxedParser<'a, NewOutput, State>
     where
@@ -147,7 +147,7 @@ pub trait Parser<'a, Output, State: Clone + Debug> {
   where
     Self: Sized + 'a,
     State: 'a,
-    Output: Clone + Debug + 'a,
+    Output: Clone + 'a,
     F: Fn(Output, State) -> State + 'a,
   {
     BoxedParser::new(update_state(self, f))
@@ -157,7 +157,7 @@ pub trait Parser<'a, Output, State: Clone + Debug> {
 impl<'a, F, Output, State: 'a> Parser<'a, Output, State> for F
 where
   F: Fn(&'a str, Location, State) -> ParseResult<'a, Output,State>,
-  State: Clone + Debug,
+  State: Clone,
 {
   fn parse(&self, input: &'a str, location: Location, state: State) -> ParseResult<'a, Output, State> {
     self(input, location, state)
@@ -172,7 +172,7 @@ impl<'a, Output,State> BoxedParser<'a, Output, State> {
   pub fn new<P>(parser: P) -> Self
   where
       P: Parser<'a, Output, State> + 'a,
-      State: Clone + Debug,
+      State: Clone,
   {
       BoxedParser {
           parser: Box::new(parser),
@@ -182,19 +182,19 @@ impl<'a, Output,State> BoxedParser<'a, Output, State> {
 
 impl<'a, Output, State> Parser<'a, Output, State> for BoxedParser<'a, Output, State>
   where
-    State: Clone + Debug,
+    State: Clone,
   {
   fn parse(&self, input: &'a str, location: Location, state: State) -> ParseResult<'a, Output, State> {
       self.parser.parse(input, location, state)
   }
 }
 
-fn and_then<'a, P, F, A, B, S: Clone + Debug + 'a, NextP>(parser: P, f: F) -> impl Parser<'a, B, S>
+fn and_then<'a, P, F, A, B, S: Clone + 'a, NextP>(parser: P, f: F) -> impl Parser<'a, B, S>
   where
     P: Parser<'a, A, S>,
     NextP: Parser<'a, B, S>,
     F: Fn(A) -> NextP,
-    S: Clone + Debug,
+    S: Clone,
 {
   move |input, location, state| parser.parse(input, location, state)
     .and_then(| next_input, next_output, next_location, next_state: S |
@@ -202,7 +202,7 @@ fn and_then<'a, P, F, A, B, S: Clone + Debug + 'a, NextP>(parser: P, f: F) -> im
     )
 }
 
-pub fn token<'a, S: Clone + Debug + 'a>(expected: &'static str) -> BoxedParser<'a, &str, S> {
+pub fn token<'a, S: Clone + 'a>(expected: &'static str) -> BoxedParser<'a, &str, S> {
   BoxedParser::new(
     move |input: &'a str, location: Location, state: S| {
     let found = input.get(0..expected.len());
@@ -254,7 +254,7 @@ pub fn display_token<T: Display>(token: Option<T>) -> String {
   }
 }
 
-pub fn pair<'a, P1, P2, R1, R2, S: Clone + Debug + 'a>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2), S>
+pub fn pair<'a, P1, P2, R1, R2, S: Clone + 'a>(parser1: P1, parser2: P2) -> impl Parser<'a, (R1, R2), S>
 where
   P1: Parser<'a, R1, S>,
   P2: Parser<'a, R2, S>,
@@ -268,7 +268,7 @@ where
       )
 }
 
-pub fn quadruple<'a, P1: 'a, P2: 'a, P3: 'a, P4: 'a, R1: 'a, R2: 'a, R3: 'a, R4: 'a, S: Clone + Debug + 'a>
+pub fn quadruple<'a, P1: 'a, P2: 'a, P3: 'a, P4: 'a, R1: 'a, R2: 'a, R3: 'a, R4: 'a, S: Clone + 'a>
   (parser1: P1, parser2: P2, parser3: P3, parser4: P4)
   -> BoxedParser<'a, (R1, R2, R3, R4), S>
   where
@@ -286,7 +286,7 @@ pub fn quadruple<'a, P1: 'a, P2: 'a, P3: 'a, P4: 'a, R1: 'a, R2: 'a, R3: 'a, R4:
   )
 }
 
-pub fn map<'a, P: 'a, F: 'a, A, B, S: Clone + Debug + 'a>(parser: P, map_fn: F) -> BoxedParser<'a, B, S>
+pub fn map<'a, P: 'a, F: 'a, A, B, S: Clone + 'a>(parser: P, map_fn: F) -> BoxedParser<'a, B, S>
 where
   P: Parser<'a, A, S>,
   F: Fn(A) -> B,
@@ -297,7 +297,7 @@ where
   ))
 }
 
-pub fn map_with_state<'a, P: 'a, F: 'a, A, B, S: Clone + Debug + 'a>(parser: P, map_fn: F) -> BoxedParser<'a, B, S>
+pub fn map_with_state<'a, P: 'a, F: 'a, A, B, S: Clone + 'a>(parser: P, map_fn: F) -> BoxedParser<'a, B, S>
 where
   P: Parser<'a, A, S>,
   F: Fn(A, S) -> B,
@@ -330,7 +330,7 @@ where
   )
 }
 
-pub fn map_err<'a, P, F, A, S: Clone + Debug + 'a>(parser: P, map_fn: F) -> impl Parser<'a, A, S>
+pub fn map_err<'a, P, F, A, S: Clone + 'a>(parser: P, map_fn: F) -> impl Parser<'a, A, S>
 where
   P: Parser<'a, A, S>,
   F: Fn(String) -> String,
@@ -340,7 +340,7 @@ where
   )
 }
 
-fn map2<'a, P1, P2, F, A, B, C, S: Clone + Debug + 'a>(parser1: P1, parser2: P2, map_fn: F) -> impl Parser<'a, C, S>
+fn map2<'a, P1, P2, F, A, B, C, S: Clone + 'a>(parser1: P1, parser2: P2, map_fn: F) -> impl Parser<'a, C, S>
 where
   P1: Parser<'a, A, S>,
   P2: Parser<'a, B, S>,
@@ -353,7 +353,7 @@ where
   )
 }
 
-pub fn left<'a, P1: 'a, P2: 'a, R1: 'a, R2: 'a, S: Clone + Debug + 'a>(parser1: P1, parser2: P2) -> BoxedParser<'a, R1, S>
+pub fn left<'a, P1: 'a, P2: 'a, R1: 'a, R2: 'a, S: Clone + 'a>(parser1: P1, parser2: P2) -> BoxedParser<'a, R1, S>
 where
   P1: Parser<'a, R1, S>,
   P2: Parser<'a, R2, S>,
@@ -361,7 +361,7 @@ where
   map(pair(parser1, parser2), |(left, _right)| left)
 }
 
-pub fn right<'a, P1: 'a, P2: 'a, R1: 'a, R2: 'a, S: Clone + Debug + 'a>(parser1: P1, parser2: P2) -> BoxedParser<'a, R2, S>
+pub fn right<'a, P1: 'a, P2: 'a, R1: 'a, R2: 'a, S: Clone + 'a>(parser1: P1, parser2: P2) -> BoxedParser<'a, R2, S>
 where
   P1: Parser<'a, R1, S>,
   P2: Parser<'a, R2, S>,
@@ -369,21 +369,21 @@ where
   map(pair(parser1, parser2), |(_left, right)| right)
 }
 
-pub fn one_or_more<'a, P, A, S: Clone + Debug + 'a>(parser: P) -> impl Parser<'a, Vec<A>, S>
+pub fn one_or_more<'a, P, A, S: Clone + 'a>(parser: P) -> impl Parser<'a, Vec<A>, S>
 where
   P: Parser<'a, A, S>,
 {
   one_or_more_with_ending(false, parser)
 }
 
-pub fn one_or_more_till_end<'a, P, A, S: Clone + Debug + 'a>(parser: P) -> impl Parser<'a, Vec<A>, S>
+pub fn one_or_more_till_end<'a, P, A, S: Clone + 'a>(parser: P) -> impl Parser<'a, Vec<A>, S>
 where
   P: Parser<'a, A, S>,
 {
   one_or_more_with_ending(true, parser)
 } 
 
-pub fn one_or_more_with_ending<'a, P, A, S: Clone + Debug + 'a>(till_end: bool, parser: P) -> impl Parser<'a, Vec<A>, S>
+pub fn one_or_more_with_ending<'a, P, A, S: Clone + 'a>(till_end: bool, parser: P) -> impl Parser<'a, Vec<A>, S>
 where
   P: Parser<'a, A, S>,
 {
@@ -457,7 +457,7 @@ where
   }
 }
 
-pub fn zero_or_more<'a, P: 'a, A, S: Clone + Debug + 'a>(parser: P) -> BoxedParser<'a, Vec<A>, S>
+pub fn zero_or_more<'a, P: 'a, A, S: Clone + 'a>(parser: P) -> BoxedParser<'a, Vec<A>, S>
 where
   P: Parser<'a, A, S>,
 {
@@ -487,7 +487,7 @@ where
   })
 }
 
-pub fn any_char<'a, S: Clone + Debug + 'a>() -> impl Parser<'a, char, S> {
+pub fn any_char<'a, S: Clone + 'a>() -> impl Parser<'a, char, S> {
   |input: &'a str, location: Location, state| match input.chars().next() {
     Some(character) => ParseResult::ParseOk {
       input: &input[character.len_utf8()..],
@@ -504,7 +504,7 @@ pub fn any_char<'a, S: Clone + Debug + 'a>() -> impl Parser<'a, char, S> {
   }
 }
 
-fn pred<'a, P, F, A: std::fmt::Display, S: Clone + Debug + 'a>(parser: P, predicate: F, expecting: &'a str) -> impl Parser<'a, A, S>
+fn pred<'a, P, F, A: std::fmt::Display, S: Clone + 'a>(parser: P, predicate: F, expecting: &'a str) -> impl Parser<'a, A, S>
 where
   P: Parser<'a, A, S>,
   F: Fn(&A) -> bool,
@@ -549,14 +549,14 @@ where
   }
 }
 
-pub fn space_char<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
+pub fn space_char<'a, S: Clone + 'a>() -> BoxedParser<'a, (), S> {
   any_char().pred(
     |character| *character == ' ',
     "a whitespace",
   ).ignore()
 }
 
-pub fn newline_char<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
+pub fn newline_char<'a, S: Clone + 'a>() -> BoxedParser<'a, (), S> {
   BoxedParser::new(
     (move |input, location, state: S| {
       let mut next_input: &str = input;
@@ -611,7 +611,7 @@ pub fn newline_char<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
   )
 }
 
-fn newline0<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
+fn newline0<'a, S: Clone + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
   zero_or_more(
     ignore_chain(vec![
       indents(indentations),
@@ -620,29 +620,29 @@ fn newline0<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a, (
   ).ignore()
 }
 
-pub fn newline1<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
+pub fn newline1<'a, S: Clone + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
   ignore_chain(vec![
     newline_char(),
     newline0(indentations),
   ])
 }
 
-pub fn space0<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
+pub fn space0<'a, S: Clone + 'a>() -> BoxedParser<'a, (), S> {
   zero_or_more(space_char()).ignore()
 }
 
-pub fn space1<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
+pub fn space1<'a, S: Clone + 'a>() -> BoxedParser<'a, (), S> {
   one_or_more(space_char()).ignore()
 }
 
-pub fn indent<'a, S: Clone + Debug + 'a>() -> BoxedParser<'a, (), S> {
+pub fn indent<'a, S: Clone + 'a>() -> BoxedParser<'a, (), S> {
   ignore_chain(vec![
     space_char(),
     space_char(),
   ]).map_err(|_| "I'm expecting an indentation.\nAll indentations should be two spaces.".to_string())
 }
 
-pub fn indents<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
+pub fn indents<'a, S: Clone + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
   repeat(
     indentations,
     indent(),
@@ -650,7 +650,7 @@ pub fn indents<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a
   .ignore()
 }
 
-fn repeat<'a, A, P, S: Clone + Debug + 'a>(times: usize, parser: P)
+fn repeat<'a, A, P, S: Clone + 'a>(times: usize, parser: P)
   -> impl Parser<'a, Vec<A>, S>
   where
     P: Parser<'a, A, S>
@@ -696,7 +696,7 @@ fn repeat<'a, A, P, S: Clone + Debug + 'a>(times: usize, parser: P)
   }
 }
 
-pub fn choose3<'a, A: 'a, P: 'a, S: Clone + Debug + 'a>(parser1: P, parser2: P, parser3: P)
+pub fn choose3<'a, A: 'a, P: 'a, S: Clone + 'a>(parser1: P, parser2: P, parser3: P)
   -> BoxedParser<'a, A, S>
   where
     P: Parser<'a, A, S>
@@ -710,7 +710,7 @@ pub fn choose3<'a, A: 'a, P: 'a, S: Clone + Debug + 'a>(parser1: P, parser2: P, 
   )
 }
 
-pub fn either<'a, A, P: 'a, S: Clone + Debug + 'a>(parser1: P, parser2: P)
+pub fn either<'a, A, P: 'a, S: Clone + 'a>(parser1: P, parser2: P)
   -> BoxedParser<'a, A, S>
   where
     P: Parser<'a, A, S>
@@ -731,7 +731,7 @@ pub fn either<'a, A, P: 'a, S: Clone + Debug + 'a>(parser1: P, parser2: P)
   )
 }
 
-pub fn optional<'a, A: Clone + 'a, P: 'a, S: Clone + Debug + 'a>(default: A, parser: P)
+pub fn optional<'a, A: Clone + 'a, P: 'a, S: Clone + 'a>(default: A, parser: P)
   -> BoxedParser<'a, A, S>
   where
     P: Parser<'a, A, S>
@@ -752,7 +752,7 @@ pub fn optional<'a, A: Clone + 'a, P: 'a, S: Clone + Debug + 'a>(default: A, par
   )
 }
 
-pub fn newline_with_comment<'a, S: Clone + Debug + 'a>(comment_symbol: &'static str) -> impl Parser<'a, (), S> {
+pub fn newline_with_comment<'a, S: Clone + 'a>(comment_symbol: &'static str) -> impl Parser<'a, (), S> {
   either(
     ignore_chain(vec![
       space0(),
@@ -765,7 +765,7 @@ pub fn newline_with_comment<'a, S: Clone + Debug + 'a>(comment_symbol: &'static 
   )
 }
 
-pub fn line_comment<'a, S: Clone + Debug + 'a>(comment_symbol: &'static str) -> BoxedParser<'a, (), S> {
+pub fn line_comment<'a, S: Clone + 'a>(comment_symbol: &'static str) -> BoxedParser<'a, (), S> {
   ignore_chain(vec![
     token(comment_symbol).ignore(),
     zero_or_more(any_char().pred(
@@ -776,7 +776,7 @@ pub fn line_comment<'a, S: Clone + Debug + 'a>(comment_symbol: &'static str) -> 
   ])
 }
 
-pub fn line_comments<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
+pub fn line_comments<'a, S: Clone + 'a>(indentations: usize) -> BoxedParser<'a, (), S> {
   either(
     one_or_more(
       ignore_chain(vec![
@@ -794,7 +794,7 @@ pub fn line_comments<'a, S: Clone + Debug + 'a>(indentations: usize) -> BoxedPar
   )
 }
 
-pub fn ignore_chain<'a, S: Clone + Debug + 'a>(parsers: Vec<BoxedParser<'a, (), S>>) -> BoxedParser<'a, (), S>
+pub fn ignore_chain<'a, S: Clone + 'a>(parsers: Vec<BoxedParser<'a, (), S>>) -> BoxedParser<'a, (), S>
 {
   BoxedParser::new(
     move | mut input, mut location, mut state | {
@@ -824,7 +824,7 @@ pub fn ignore_chain<'a, S: Clone + Debug + 'a>(parsers: Vec<BoxedParser<'a, (), 
   })
 }
 
-pub fn whole_decimal<'a, S: Clone + Debug + 'a>() -> impl Parser<'a, usize, S> {
+pub fn whole_decimal<'a, S: Clone + 'a>() -> impl Parser<'a, usize, S> {
   one_or_more(
     any_char().pred(
     | character |
@@ -834,7 +834,7 @@ pub fn whole_decimal<'a, S: Clone + Debug + 'a>() -> impl Parser<'a, usize, S> {
   ).map(| digits | digits.iter().collect::<String>().parse().unwrap())
 }
 
-pub fn located<'a, P: 'a, A, S: Clone + Debug + 'a>(parser: P) -> impl Parser<'a, Located<A>, S>
+pub fn located<'a, P: 'a, A, S: Clone + 'a>(parser: P) -> impl Parser<'a, Located<A>, S>
   where
     P: Parser<'a, A, S>
 {
@@ -891,7 +891,7 @@ pub fn display_error(source: &str, error_message: String, from: Location, to: Lo
   error_report
 }
 
-pub fn update_state<'a, P, A: Clone, S: Clone + Debug + 'a, F>(parser: P, f: F) -> impl Parser<'a, A, S>
+pub fn update_state<'a, P, A: Clone, S: Clone + 'a, F>(parser: P, f: F) -> impl Parser<'a, A, S>
   where
     P: Parser<'a, A, S>,
     F: Fn(A, S) -> S
