@@ -72,7 +72,7 @@ pub struct Jump {
   pub GT: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct State {
   symbol_table: HashMap<String, usize>,
   instruction_index: usize,
@@ -121,7 +121,6 @@ pub fn parse<'a>(source: &'a str) -> Result<Vec<Instruction>, String> {
               match a_instruction {
               AInstruction::label(label) =>
               {
-                println!("{:#?}", state.symbol_table);
                 match state.symbol_table.get(&label.value) {
                   Some(index) => AInstruction::number(*index),
                   None => {
@@ -397,17 +396,17 @@ fn destinations<'a>() -> impl Parser<'a, Destinations, State> {
 fn other<'a>() -> BoxedParser<'a, Instruction, State> {
   BoxedParser::new(|input, location, state: State| {
     match token("(").parse(input, location, state.clone()) {
-      ParseResult::ParseOk { .. } =>
-        right(
+      ParseResult::ParseOk { .. } => {
+        let result = right(
           token("("),
         left(
           goto_label(),
           token(")"),
         ).update_state(move |label, state|
           if !state.symbol_table.contains_key::<str>(&label) {
-            let new_symbol_table = state.symbol_table.update(label.clone(), state.instruction_index + 1);
-            println!("new symbol table: {:#?}", new_symbol_table);
+            let new_symbol_table = state.symbol_table.update(label.clone(), state.variable_index + 1);
             State {
+              variable_index: state.variable_index + 1,
               symbol_table: new_symbol_table,
               ..state
             }
@@ -415,7 +414,10 @@ fn other<'a>() -> BoxedParser<'a, Instruction, State> {
             state
           }
         )
-      ).ignore().parse(input, location, state),
+      ).ignore().parse(input, location, state);
+      println!("{:#?}", result);
+      result
+      },
       ParseResult::ParseError { .. } =>
         either(line_comment("//"), newline_char()).parse(input, location, state),
     }.map(|_| Instruction::Ignored)
@@ -426,8 +428,8 @@ fn maybe_indented<'a, A: 'a>(parser: BoxedParser<'a, A, State>) -> BoxedParser<'
 {
   BoxedParser::new(move |input, location, state: State|
     match zero_or_more(space_char()).parse(input, location, state.clone()) {
-      ParseResult::ParseOk{ input: next_input, location: next_location, ..} =>
-        parser.parse(next_input, next_location, state),
+      ParseResult::ParseOk{ input: next_input, location: next_location, state: next_state, .. } =>
+        parser.parse(next_input, next_location, next_state),
       ParseResult::ParseError { .. } =>
         parser.parse(input, location, state),
   })
