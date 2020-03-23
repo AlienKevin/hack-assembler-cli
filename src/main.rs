@@ -1,8 +1,6 @@
-mod hack_assembler;
-mod hack_emitter;
-mod hack_parser;
-
+extern crate hack_assembler;
 extern crate clap;
+
 use clap::{App, Arg,};
 use std::fs::File;
 use std::io::prelude::*;

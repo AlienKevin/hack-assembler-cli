@@ -55,6 +55,15 @@ name = "hack-assembler"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "hack-assembler 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "hack-assembler"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63a8578e26a741a4f57c3db184ca28ab605fe7fa0b9fad13efbf6ad21c8cb764"
+dependencies = [
  "im",
  "lazy_static",
 ]
